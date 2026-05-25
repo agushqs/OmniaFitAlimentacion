@@ -34,4 +34,8 @@ interface DietDao {
 
     @Delete
     suspend fun eliminarAlimento(alimento: AlimentoItem)
+
+    // Cuenta total de alimentos registrados (en cualquier dieta y comida).
+    @Query("SELECT COUNT(*) FROM tabla_alimentos")
+    suspend fun contarAlimentos(): Int
 }
