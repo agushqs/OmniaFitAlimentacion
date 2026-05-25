@@ -2,54 +2,60 @@ package com.example.omniafitalimentacion.ui.viewmodels
 
 import android.util.Log
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.omniafitalimentacion.data.local.DietDao
 import com.example.omniafitalimentacion.data.network.RetrofitClient
+import com.example.omniafitalimentacion.model.AlimentoItem
 import com.example.omniafitalimentacion.model.Dieta
 import com.example.omniafitalimentacion.model.Product
-import com.example.omniafitalimentacion.model.AlimentoItem // <-- Asegúrate de tener esto en tu modelo
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import androidx.room.Dao
 
-class DietViewModel : ViewModel() {
+class DietViewModel(private val dao: DietDao) : ViewModel() {
 
-    private val _dietas = MutableStateFlow<List<Dieta>>(emptyList())
-    val dietas: StateFlow<List<Dieta>> = _dietas.asStateFlow()
+    val dietas: StateFlow<List<Dieta>> = dao.obtenerTodasLasDietas()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Estado para los resultados de búsqueda
     private val _searchResults = MutableStateFlow<List<Product>>(emptyList())
     val searchResults: StateFlow<List<Product>> = _searchResults.asStateFlow()
 
-    // NUEVO: Estado para almacenar los alimentos que el usuario selecciona de la búsqueda
-    private val _alimentosSeleccionados = MutableStateFlow<List<AlimentoItem>>(emptyList())
-    val alimentosSeleccionados: StateFlow<List<AlimentoItem>> = _alimentosSeleccionados.asStateFlow()
+    private val _dietaActivaId = MutableStateFlow<Int?>(null)
+    val dietaActivaId: StateFlow<Int?> = _dietaActivaId.asStateFlow()
 
-    // 📍 Función temporal para verificar la API
-    fun probarConexionApi() {
+    private val _alimentosActivos = MutableStateFlow<List<AlimentoItem>>(emptyList())
+    val alimentosActivos: StateFlow<List<AlimentoItem>> = _alimentosActivos.asStateFlow()
+
+    init {
         viewModelScope.launch {
-            try {
-                // Hacemos una búsqueda de prueba: "manzana"
-                val response = RetrofitClient.apiService.searchFood("manzana")
-
-                if (response.products.isNotEmpty()) {
-                    val primerProducto = response.products[0]
-                    Log.d("API_TEST", "✅ ¡Éxito! Producto encontrado: ${primerProducto.productName}")
-                    Log.d("API_TEST", "🔥 Calorías (por 100g): ${primerProducto.nutriments?.energyKcal100g}")
-                    Log.d("API_TEST", "🖼️ URL de la imagen: ${primerProducto.imageUrl}")
-                } else {
-                    Log.w("API_TEST", "⚠️ La API respondió correctamente, pero la lista de productos está vacía.")
+            dietas.collect { lista ->
+                if (lista.isNotEmpty() && _dietaActivaId.value == null) {
+                    seleccionarDieta(lista.first().id)
                 }
-            } catch (e: Exception) {
-                // Si falta el permiso de internet o hay un error de red, caerá aquí
-                Log.e("API_TEST", "❌ Error en la conexión: ${e.message}")
             }
         }
     }
 
-    fun crearNuevaDieta() {
-        val nuevaDieta = listOf(Dieta(1, "Hoy"))
-        _dietas.value = nuevaDieta
+    fun seleccionarDieta(id: Int) {
+        _dietaActivaId.value = id
+        viewModelScope.launch {
+            dao.obtenerAlimentosPorDieta(id).collect { lista ->
+                _alimentosActivos.value = lista
+            }
+        }
+    }
+
+    fun crearNuevaDieta(nombre: String, fecha: String) {
+        viewModelScope.launch {
+            val nuevaDieta = Dieta(nombre = nombre, fechaAsignada = fecha)
+            val nuevoId = dao.insertarDieta(nuevaDieta)
+            seleccionarDieta(nuevoId.toInt())
+        }
     }
 
     fun buscarAlimento(query: String) {
@@ -63,15 +69,39 @@ class DietViewModel : ViewModel() {
         }
     }
 
-    // NUEVO: Función que se ejecuta al pulsar un alimento en la pantalla de búsqueda
-    fun añadirAlimento(producto: Product) {
+    // --- LA NUEVA FUNCIÓN QUE CALCULA LAS CALORÍAS SEGÚN LOS GRAMOS ---
+    fun añadirAlimentoADieta(producto: Product, gramos: Double) {
+        val idDietaActual = _dietaActivaId.value ?: return
+
+        // Regla de tres: (Kcal por 100g / 100) * gramos del usuario
+        val kcalPor100g = producto.nutriments?.energyKcal100g ?: 0.0
+        val kcalCalculadas = (kcalPor100g / 100.0) * gramos
+
         val nuevoAlimento = AlimentoItem(
-            nombre = producto.productName ?: "Desconocido",
-            kcal = producto.nutriments?.energyKcal100g?.toInt() ?: 0,
+            dietaId = idDietaActual,
+            nombre = producto.productName ?: "Alimento genérico",
+            kcal = kcalCalculadas.toInt(),
             imagenUrl = producto.imageUrl
         )
-        // Añadimos el nuevo alimento conservando los que ya estaban en la lista
-        _alimentosSeleccionados.value = _alimentosSeleccionados.value + nuevoAlimento
+
+        viewModelScope.launch {
+            dao.insertarAlimento(nuevoAlimento)
+        }
+    }
+    fun eliminarAlimentoDeDieta(alimento: AlimentoItem) {
+        viewModelScope.launch {
+            dao.eliminarAlimento(alimento)
+        }
+    }
+}
+
+class DietViewModelFactory(private val dao: DietDao) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(DietViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return DietViewModel(dao) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 

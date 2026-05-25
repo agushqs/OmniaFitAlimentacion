@@ -15,6 +15,7 @@ import coil.compose.AsyncImage
 import com.example.omniafitalimentacion.model.AlimentoItem
 import com.example.omniafitalimentacion.model.Dieta
 import com.example.omniafitalimentacion.ui.viewmodels.DietViewModel
+import com.example.omniafitalimentacion.data.local.DietDao
 
 @Composable
 fun DietScreen(
@@ -22,8 +23,7 @@ fun DietScreen(
     onNavigateToSearch: () -> Unit
 ) {
     val dietas by viewModel.dietas.collectAsState()
-    // NUEVO: Observamos los alimentos que el usuario ha ido añadiendo
-    val alimentos by viewModel.alimentosSeleccionados.collectAsState()
+    val alimentos by viewModel.alimentosActivos.collectAsState()
 
     Scaffold(
         topBar = { OmniaFitTopBar() },
@@ -35,13 +35,15 @@ fun DietScreen(
                 .padding(paddingValues)
         ) {
             if (dietas.isEmpty()) {
-                // Si no hay dietas, el botón de añadir crea una dieta vacía para empezar
-                EmptyDietState(onAddClick = { viewModel.crearNuevaDieta() })
+                EmptyDietState(onAddClick = { viewModel.crearNuevaDieta("Dieta Base", "2026-05-25") })
             } else {
-                // Pasamos la lista de alimentos a la pantalla activa
                 ActiveDietState(
                     alimentos = alimentos,
-                    onAddFoodClick = onNavigateToSearch
+                    onAddFoodClick = onNavigateToSearch,
+                    // NUEVO: Pasamos la acción de borrar desde el ViewModel
+                    onDeleteFoodClick = { alimento ->
+                        viewModel.eliminarAlimentoDeDieta(alimento)
+                    }
                 )
             }
         }
@@ -68,7 +70,11 @@ fun EmptyDietState(onAddClick: () -> Unit) {
 }
 
 @Composable
-fun ActiveDietState(alimentos: List<AlimentoItem>, onAddFoodClick: () -> Unit) {
+fun ActiveDietState(
+    alimentos: List<AlimentoItem>,
+    onAddFoodClick: () -> Unit,
+    onDeleteFoodClick: (AlimentoItem) -> Unit // NUEVO: Parámetro para recibir la acción de borrar
+) {
     Column(modifier = Modifier.padding(16.dp)) {
         // Calendario (Placeholder)
         Card(modifier = Modifier.fillMaxWidth().height(150.dp)) {
@@ -79,7 +85,7 @@ fun ActiveDietState(alimentos: List<AlimentoItem>, onAddFoodClick: () -> Unit) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Botón general para ir al buscador (simulando que añades al desayuno/almuerzo por ahora)
+        // Botón general para ir al buscador
         Button(
             onClick = onAddFoodClick,
             modifier = Modifier.fillMaxWidth(),
@@ -92,12 +98,10 @@ fun ActiveDietState(alimentos: List<AlimentoItem>, onAddFoodClick: () -> Unit) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // NUEVO: Título dinámico que suma las calorías totales
         val totalKcal = alimentos.sumOf { it.kcal }
         Text("Alimentos Consumidos ($totalKcal Kcal)", style = MaterialTheme.typography.titleMedium)
         Spacer(modifier = Modifier.height(8.dp))
 
-        // NUEVO: Lista dinámica de los alimentos que has seleccionado
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (alimentos.isEmpty()) {
                 item {
@@ -105,16 +109,22 @@ fun ActiveDietState(alimentos: List<AlimentoItem>, onAddFoodClick: () -> Unit) {
                 }
             } else {
                 items(alimentos) { alimento ->
-                    AlimentoCard(alimento)
+                    // NUEVO: Le pasamos a la tarjeta qué hacer cuando pulsen la papelera
+                    AlimentoCard(
+                        alimento = alimento,
+                        onDeleteClick = { onDeleteFoodClick(alimento) }
+                    )
                 }
             }
         }
     }
 }
 
-// NUEVO: Tarjeta diseñada para mostrar los alimentos añadidos
 @Composable
-fun AlimentoCard(alimento: AlimentoItem) {
+fun AlimentoCard(
+    alimento: AlimentoItem,
+    onDeleteClick: () -> Unit // NUEVO: Acción al pulsar el botón
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -129,9 +139,21 @@ fun AlimentoCard(alimento: AlimentoItem) {
                 modifier = Modifier.size(50.dp)
             )
             Spacer(modifier = Modifier.width(12.dp))
-            Column {
+
+            // Usamos weight(1f) para que los textos ocupen el espacio disponible
+            // y empujen la papelera a la derecha del todo
+            Column(modifier = Modifier.weight(1f)) {
                 Text(text = alimento.nombre, style = MaterialTheme.typography.titleMedium)
                 Text(text = "${alimento.kcal} Kcal", style = MaterialTheme.typography.bodySmall)
+            }
+
+            // NUEVO: El botón de la papelera en rojo
+            IconButton(onClick = onDeleteClick) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Borrar alimento",
+                    tint = MaterialTheme.colorScheme.error
+                )
             }
         }
     }

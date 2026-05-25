@@ -5,7 +5,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 
 object RetrofitClient {
     // Apuntamos directamente al subdominio en español (es.)
-    private const val BASE_URL = "https://es.openfoodfacts.org/"
+    private const val BASE_URL = "https://world.openfoodfacts.org/"
 
     val apiService: FoodApiService by lazy {
         Retrofit.Builder()
